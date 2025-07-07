@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Simple Interactive Page</title>
+    <style>
+      body {
+        font-family: sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 90vh; /* Use most of the viewport height */
+        margin: 0;
+        background-color: #f0f0f0;
+        text-align: center;
+      }
+      .container {
+        padding: 20px;
+        background-color: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+      }
+      h1 {
+        color: #333;
+      }
+      p {
+        color: #555;
+        font-size: 1.1em;
+      }
+      button {
+        padding: 10px 20px;
+        font-size: 1em;
+        color: white;
+        background-color: #007bff;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+      button:hover {
+        background-color: #0056b3;
+      }
+      #messageArea {
+        margin-top: 20px;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        min-height: 30px;
+        background-color: #e9ecef;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Hello from the MCP HTML Resource!</h1>
+      <p>This is a simple HTML page served by the MCP server.</p>
+
+      <button id="myButton">Click Me!</button>
+
+      <div id="messageArea">Initial message.</div>
+    </div>
+
+    <script>
+      // This script will only run if 'allow-scripts' is enabled in the iframe sandbox.
+      document.addEventListener('DOMContentLoaded', function () {
+        const button = document.getElementById('myButton');
+        const messageArea = document.getElementById('messageArea');
+        let clickCount = 0;
+
+        if (button && messageArea) {
+          button.addEventListener('click', function () {
+            clickCount++;
+            messageArea.textContent =
+              'Button clicked ' +
+              clickCount +
+              ' time(s)! The JavaScript is working.';
+            console.log(
+              'Button click event fired from within the iframe HTML resource.',
+            );
+          });
+        } else {
+          console.error('Could not find button or message area elements.');
+          if (messageArea) {
+            messageArea.textContent =
+              'Error: Script loaded, but elements not found.';
+          }
+        }
+
+        // Test console logging from iframe
+        console.log('Simple HTML page script loaded and DOM is ready.');
+
+        // Example of trying to access something that might be restricted by sandbox
+        try {
+          console.log(
+            'Attempting to access parent window location (might be blocked):',
+            window.parent.location.href,
+          );
+        } catch (e) {
+          console.warn('Could not access parent window location:', e.message);
+        }
+
+        try {
+          localStorage.setItem('iframeTest', 'Hello from iframe localStorage');
+          console.log(
+            'localStorage test item set from iframe:',
+            localStorage.getItem('iframeTest'),
+          );
+        } catch (e) {
+          console.warn('Could not use localStorage in iframe:', e.message);
+        }
+      });
+    </script>
+  </body>
+</html>

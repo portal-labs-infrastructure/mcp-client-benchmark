@@ -1,0 +1,29 @@
+{
+  "name": "mcp-client-evals",
+  "version": "0.1.0",
+  "description": "An MCP server for MCP client evaluations",
+  "scripts": {
+    "start": "node build/src/index.js",
+    "build": "rimraf build && tsc",
+    "dev": "nodemon",
+    "types": "npx supabase gen types typescript --project-id vpflpiqkwzipnasjpuyi --schema public > types/supabase.ts"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/express": "^5.0.2",
+    "@types/morgan": "^1.9.9",
+    "dotenv": "^16.4.5",
+    "nodemon": "^3.1.4",
+    "prettier": "^3.5.3",
+    "rimraf": "^6.0.1",
+    "ts-node": "^10.9.2"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.1",
+    "express": "^5.1.0",
+    "morgan": "^1.10.0",
+    "@supabase/supabase-js": "^2.50.0",
+    "uuid": "^11.1.0"
+  }
+}
