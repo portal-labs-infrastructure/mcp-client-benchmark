@@ -1,20 +1,32 @@
 import { CallToolResult } from '@modelcontextprotocol/sdk/types';
 import { BenchmarkContext } from '../core/benchmark-context';
-import { IBenchmarkState } from './benchmark-state.interface';
 import { DetailsSchema } from '../../mcp_setup/tools/setup-submit-details-tool';
 import { AwaitingConfirmationState } from './awaiting-confirmation.state';
+import { AbstractBenchmarkState } from './abstract-benchmark.state';
 
-export class AwaitingDetailsToolState implements IBenchmarkState {
+export class AwaitingDetailsToolState extends AbstractBenchmarkState {
   async enter(context: BenchmarkContext): Promise<void> {
     console.log(
       `[State] Entering AwaitingDetailsToolState for session ${context.sessionId}`,
     );
-    // Enable the tool for the client to use.
-    context.mcpEntities.submitDetailsTool?.enable();
   }
 
   async exit(context: BenchmarkContext): Promise<void> {
-    context.mcpEntities.submitDetailsTool?.disable();
+    console.log(
+      `[State] Exiting AwaitingDetailsToolState for session ${context.sessionId}`,
+    );
+  }
+
+  getEnterConfigActions(context: BenchmarkContext) {
+    console.log(
+      `[State] Entering AwaitingDetailsToolState for session ${context.sessionId}`,
+    );
+    // Enable the tool for the client to use.
+    return [() => context.mcpEntities.submitDetailsTool?.enable()];
+  }
+
+  getExitConfigActions(context: BenchmarkContext) {
+    return [() => context.mcpEntities.submitDetailsTool?.disable()];
   }
 
   // This new method will be called by the tool's handler.
@@ -25,6 +37,12 @@ export class AwaitingDetailsToolState implements IBenchmarkState {
     const validationResult = DetailsSchema.safeParse(data);
 
     if (!validationResult.success) {
+      context.awardPoints(
+        'elicitation_support',
+        'FAILED',
+        0,
+        'Client attempted to submit details via a tool but validation failed.',
+      );
       // Return a user-facing error message.
       return {
         content: [
@@ -36,6 +54,13 @@ export class AwaitingDetailsToolState implements IBenchmarkState {
       };
     }
 
+    context.awardPoints(
+      'elicitation_support',
+      'FAILED',
+      0,
+      'Client submitted data via a tool call instead of elicitation.',
+    );
+
     // On success, update data and transition.
     const { guests, time } = validationResult.data;
     await context.updateAndPersistSessionData({ guests, time });
@@ -43,63 +68,6 @@ export class AwaitingDetailsToolState implements IBenchmarkState {
 
     return {
       content: [{ type: 'text', text: 'Reservation details accepted.' }],
-    };
-  }
-
-  // --- Reject other actions ---
-  async startBenchmark(context: BenchmarkContext): Promise<CallToolResult> {
-    return {
-      content: [
-        { type: 'text', text: 'Error: Benchmark is already in progress.' },
-      ],
-    };
-  }
-  async chooseCategory(
-    context: BenchmarkContext,
-    category: string,
-  ): Promise<CallToolResult> {
-    return {
-      content: [{ type: 'text', text: 'Error: Category already chosen.' }],
-    };
-  }
-  async selectMenu(
-    context: BenchmarkContext,
-    menu: string,
-  ): Promise<CallToolResult> {
-    return {
-      content: [{ type: 'text', text: 'Error: Menu already chosen.' }],
-    };
-  }
-  async submitElicitation(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<void> {
-    console.warn(
-      `[State] Elicitation submitted in invalid state: AwaitingDetailsToolState`,
-    );
-    // Optionally, you could throw an error or return a specific result.
-    throw new Error('Elicitation not allowed in this state');
-  }
-  async submitSampling(
-    context: BenchmarkContext,
-    summary: string,
-  ): Promise<void> {
-    console.warn(
-      `[State] Sampling submitted in invalid state: AwaitingDetailsToolState`,
-    );
-    // Optionally, you could throw an error or return a specific result.
-    throw new Error('Sampling not allowed in this state');
-  }
-  async getConfirmationEmail(
-    context: BenchmarkContext,
-  ): Promise<CallToolResult> {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: 'Error: You must submit the reservation details before getting a confirmation.',
-        },
-      ],
     };
   }
 }

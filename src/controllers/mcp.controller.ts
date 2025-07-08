@@ -5,7 +5,10 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { McpEntities } from '../benchmark/core/benchmark-types';
 import { BenchmarkContext } from '../benchmark/core/benchmark-context';
 import { BenchmarkDbService, supabase } from '../services/supabase.service';
-import { createMcpServerOptions } from '../mcp_setup/create-mcp-server-options';
+import {
+  createMcpServerInfo,
+  createMcpServerOptions,
+} from '../mcp_setup/create-mcp-server';
 import {
   setupStartBenchmarkTool,
   setupChooseCategoryTool,
@@ -13,7 +16,11 @@ import {
   setupRestaurantListResource,
   setupSubmitDetailsTool,
   setupGetConfirmationEmailTool,
+  setupConfirmationEmailResource,
 } from '../mcp_setup';
+import { setupVerifyCodeTool } from '../mcp_setup/tools/setup-verify-code-tool';
+import { setupBenchmarkResultsResource } from '../mcp_setup/resources/setup-benchmark-results-resource';
+import { setupTryAgainTool } from '../mcp_setup/tools/setup-try-again-tool';
 
 // --- Global State ---
 // Each map holds the live objects for all active sessions, keyed by session ID.
@@ -42,7 +49,21 @@ const handleMcpRequest: RequestHandler = async (req, res) => {
       | string
       | undefined;
 
-    if (sessionIdFromHeader && activeTransports.has(sessionIdFromHeader)) {
+    if (sessionIdFromHeader && !activeTransports.has(sessionIdFromHeader)) {
+      // --- PATH FOR INVALID OR MISSING SESSIONS ---
+      // The session ID is provided but no transport exists for it.
+      console.warn(
+        `[Controller] Session ID ${sessionIdFromHeader} provided but no active transport found. Cleaning up...`,
+      );
+      destroySession(sessionIdFromHeader);
+
+      // Signals for the client to create a new session.
+      res.status(404).send('Invalid or missing session ID');
+      return;
+    } else if (
+      sessionIdFromHeader &&
+      activeTransports.has(sessionIdFromHeader)
+    ) {
       // --- PATH FOR EXISTING SESSIONS ---
       // A transport already exists, so we just retrieve it.
       transport = activeTransports.get(sessionIdFromHeader)!;
@@ -53,7 +74,10 @@ const handleMcpRequest: RequestHandler = async (req, res) => {
       );
 
       // 1. Create the server and transport instances.
-      const server = new McpServer(createMcpServerOptions());
+      const server = new McpServer(
+        createMcpServerInfo(),
+        createMcpServerOptions(),
+      );
 
       // 2. *** THE KEY ***: Register all tools on the new server BEFORE connecting.
       const mcpEntities: McpEntities = {
@@ -63,7 +87,13 @@ const handleMcpRequest: RequestHandler = async (req, res) => {
         selectMenuTool: setupSelectMenuTool(server),
         submitDetailsTool: setupSubmitDetailsTool(server),
         getConfirmationEmailTool: setupGetConfirmationEmailTool(server),
+        verifyCodeTool: setupVerifyCodeTool(server),
+        tryAgainTool: setupTryAgainTool(server),
+
+        // Resources
         restaurantListResource: setupRestaurantListResource(server),
+        confirmationEmailResource: setupConfirmationEmailResource(server),
+        benchmarkResultsResource: setupBenchmarkResultsResource(server),
       };
 
       // 3. Define the session initialization callback.
@@ -101,6 +131,13 @@ const handleMcpRequest: RequestHandler = async (req, res) => {
         },
       });
 
+      transport.onmessage = (message) => {
+        console.log(
+          `[Controller] Received message on transport for session ${transport!.sessionId}:`,
+          message,
+        );
+      };
+
       // 4. Define the cleanup logic.
       transport.onclose = () => {
         const closedSessionId = transport!.sessionId;
@@ -115,10 +152,9 @@ const handleMcpRequest: RequestHandler = async (req, res) => {
       // 5. Connect the server and transport. This "locks" the server's capabilities.
       await server.connect(transport);
     } else {
-      // If it's not an existing session and not an initialize request, it's an error.
-      throw new Error(
-        'Invalid request: No active session and not an initialize request.',
-      );
+      // Signals for the client to create a session.
+      res.status(400).send('Invalid or missing session ID');
+      return;
     }
 
     // Let the transport handle the raw HTTP request.

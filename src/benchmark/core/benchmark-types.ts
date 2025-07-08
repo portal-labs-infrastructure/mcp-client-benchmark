@@ -12,6 +12,12 @@ export interface ClientInfo {
   // You can add other fields from the clientInfo object if needed
 }
 
+export interface RestaurantDetails {
+  id: string; // Unique identifier for the restaurant
+  name: string; // Name of the restaurant
+  description: string; // Description of the restaurant
+}
+
 // Data collected during the benchmark run
 export interface ReservationDetails {
   category?: string;
@@ -19,6 +25,8 @@ export interface ReservationDetails {
   guests?: number;
   time?: string;
   summary?: string;
+  confirmationCode?: string;
+  confirmationEmail?: string; // The text of the confirmation email
 }
 
 // Maps to the 'benchmark_sessions' table
@@ -37,10 +45,23 @@ export interface BenchmarkRun {
   status: 'in_progress' | 'completed' | 'failed';
   success?: boolean;
   time_to_completion_ms?: number;
+  score?: number; // Final score for the run
   results?: object; // Final scoring details
   steps_log: object[];
   created_at: string;
   completed_at?: string;
+}
+
+export interface ScorecardLineItem {
+  description: string; // e.g., "Responds to Elicitation Request"
+  status: 'PENDING' | 'PASSED' | 'FAILED' | 'PARTIAL' | 'SKIPPED';
+  pointsEarned: number;
+  maxPoints: number;
+  notes?: string; // e.g., "Client used fallback instead of primary method."
+}
+
+export interface Scorecard {
+  [key: string]: ScorecardLineItem;
 }
 
 // Holds the live, in-memory MCP objects for a session
@@ -51,8 +72,12 @@ export interface McpEntities {
   chooseCategoryTool: RegisteredTool | null;
   selectMenuTool: RegisteredTool | null;
   getConfirmationEmailTool: RegisteredTool | null;
+  verifyCodeTool: RegisteredTool | null;
+  submitDetailsTool: RegisteredTool | null;
+  tryAgainTool?: RegisteredTool | null;
   // Resources
   restaurantListResource: RegisteredResource | null;
-  submitDetailsTool: RegisteredTool | null;
+  confirmationEmailResource?: RegisteredResource | null;
+  benchmarkResultsResource?: RegisteredResource | null;
   // Add other tools/resources as needed
 }

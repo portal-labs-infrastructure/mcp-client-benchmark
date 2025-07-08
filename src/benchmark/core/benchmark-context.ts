@@ -1,32 +1,62 @@
-import { IBenchmarkState } from '../states/benchmark-state.interface';
-
 import { BenchmarkDbService, supabase } from '../../services/supabase.service';
 import {
   BenchmarkSession,
   McpEntities,
   ReservationDetails,
+  Scorecard,
+  ScorecardLineItem,
 } from './benchmark-types';
 import {
   CallToolResult,
   ClientCapabilities,
 } from '@modelcontextprotocol/sdk/types.js';
 import { AwaitingMenuState } from '../states/awaiting-menu.state';
-import { AwaitingElicitationState } from '../states/awaiting-elicitation.state';
-import { FinishedState } from '../states/finished.state';
 import { IdleState } from '../states/idle.state';
 import { AwaitingCategoryState } from '../states/awaiting-category.state';
 import { AwaitingDetailsToolState } from '../states/awaiting-details-tool.state';
 import { AwaitingConfirmationState } from '../states/awaiting-confirmation.state';
+import { AwaitingVerificationState } from '../states/awaiting-verification.state';
+import { AbstractBenchmarkState } from '../states/abstract-benchmark.state';
+import { FinishedState } from '../states/finished.state';
+
+// This map defines our entire rubric.
+const RUBRIC_TEMPLATE: Scorecard = {
+  elicitation_support: {
+    description: 'Client correctly handles an elicitation request.',
+    status: 'PENDING',
+    pointsEarned: 0,
+    maxPoints: 25,
+  },
+  sampling_support: {
+    description: 'Client uses sampling to generate confirmation email.',
+    status: 'PENDING',
+    pointsEarned: 0,
+    maxPoints: 20,
+  },
+  resource_reading: {
+    description: 'Client can read from a dynamically enabled resource.',
+    status: 'PENDING',
+    pointsEarned: 0,
+    maxPoints: 25,
+  },
+  code_verification: {
+    description: 'Client submits correct data from a resource to a tool.',
+    status: 'PENDING',
+    pointsEarned: 0,
+    maxPoints: 25,
+  },
+  // We can add more checks here later, like for progress notifications.
+};
 
 // A map to convert state names from the DB into class constructors.
 // We will add more states to this map as we create them.
-const stateClassMap: { [key: string]: new () => IBenchmarkState } = {
+const stateClassMap: { [key: string]: new () => AbstractBenchmarkState } = {
   [IdleState.name]: IdleState,
   [AwaitingCategoryState.name]: AwaitingCategoryState,
   [AwaitingMenuState.name]: AwaitingMenuState,
   [AwaitingDetailsToolState.name]: AwaitingDetailsToolState,
-  [AwaitingElicitationState.name]: AwaitingElicitationState,
   [AwaitingConfirmationState.name]: AwaitingConfirmationState,
+  [AwaitingVerificationState.name]: AwaitingVerificationState,
   [FinishedState.name]: FinishedState,
 };
 
@@ -35,8 +65,9 @@ const stateClassMap: { [key: string]: new () => IBenchmarkState } = {
  * It orchestrates state transitions and persists data using the BenchmarkDbService.
  */
 export class BenchmarkContext {
-  private _currentState!: IBenchmarkState;
+  private _currentState!: AbstractBenchmarkState;
   private dbService: BenchmarkDbService;
+  private scorecard!: Scorecard;
 
   // Public properties accessible by states and commands
   public readonly sessionId: string;
@@ -81,6 +112,8 @@ export class BenchmarkContext {
       session.session_data as ReservationDetails,
     );
 
+    context.scorecard = JSON.parse(JSON.stringify(RUBRIC_TEMPLATE));
+
     await context.loadState(session.current_step);
     return context;
   }
@@ -103,19 +136,34 @@ export class BenchmarkContext {
    * Transitions the context to a new state.
    * @param state The new state object to transition to.
    */
-  public async transitionTo(state: IBenchmarkState): Promise<void> {
+  public async transitionTo(state: AbstractBenchmarkState): Promise<void> {
     const newStateName = state.constructor.name;
+    const oldState = this._currentState;
 
-    await this._currentState.exit(this);
+    // --- BATCHED CONFIGURATION PHASE ---
+    // 1. Gather all synchronous configuration actions from both states.
+    const exitConfigActions = oldState.getExitConfigActions(this);
+    const enterConfigActions = state.getEnterConfigActions(this);
+
+    // 2. Execute all configuration actions in a single, synchronous block.
+    // This is where the notification debouncing magic happens.
+    for (const action of [...exitConfigActions, ...enterConfigActions]) {
+      action();
+    }
+
+    // --- ASYNCHRONOUS EXECUTION PHASE ---
+    // 3. Run the async exit logic of the old state.
+    await oldState.exit(this);
+
+    // 4. Officially change the state and persist it.
     this._currentState = state;
-
-    // Persist the new state name to the database
     await this.dbService.updateSession(
       this.sessionId,
       newStateName,
       this.reservationDetails,
     );
 
+    // 5. Run the main async entry logic of the new state.
     await this._currentState.enter(this);
   }
 
@@ -140,12 +188,55 @@ export class BenchmarkContext {
    * Finalizes the benchmark run.
    * @param result The final result of the benchmark.
    */
-  public async finalize(result: {
-    success: boolean;
-    score: number;
-    details: object;
-  }): Promise<void> {
+  async finalize() {
+    // No longer needs arguments
+    const totalScore = Object.values(this.scorecard).reduce(
+      (sum, item) => sum + item.pointsEarned,
+      0,
+    );
+
+    const result = {
+      success: totalScore > 50, // Example success threshold
+      score: totalScore,
+      details: this.scorecard, // The entire rubric is the details!
+    };
+
     await this.dbService.finalizeRun(this.sessionId, result);
+  }
+
+  /**
+   * Resets the context for a new benchmark run.
+   * This clears in-memory details and persists the reset to the database.
+   */
+  public async resetForNewRun(): Promise<void> {
+    // Clear in-memory details
+    this.reservationDetails = {};
+    // Persist the reset to the database
+    await this.dbService.resetSessionData(this.sessionId);
+  }
+
+  /**
+   * Awards points for a specific check in the scorecard.
+   * @param checkId The ID of the check to award points for.
+   * @param status The status to set for this check.
+   * @param points The number of points awarded (capped at max).
+   * @param notes Optional notes about the award.
+   */
+  public awardPoints(
+    checkId: keyof typeof RUBRIC_TEMPLATE,
+    status: ScorecardLineItem['status'],
+    points: number,
+    notes?: string,
+  ) {
+    if (this.scorecard[checkId]) {
+      const item = this.scorecard[checkId];
+      item.status = status;
+      item.pointsEarned = Math.min(points, item.maxPoints); // Cap points at max
+      item.notes = notes;
+      console.log(
+        `[Score] Awarded ${item.pointsEarned}/${item.maxPoints} for '${checkId}'. Notes: ${notes || 'N/A'}`,
+      );
+    }
   }
 
   // --- Action Methods (Delegated to Current State) ---
@@ -170,15 +261,16 @@ export class BenchmarkContext {
     return this._currentState.getConfirmationEmail(this);
   }
 
-  public async submitElicitation(data: object): Promise<CallToolResult | void> {
-    return this._currentState.submitElicitation(this, data);
+  public async verifyConfirmationCode(code: string): Promise<CallToolResult> {
+    return this._currentState.verifyConfirmationCode(this, code);
   }
 
-  public async submitSampling(summary: string): Promise<CallToolResult | void> {
-    return this._currentState.submitSampling(this, summary);
+  public async tryAgain(): Promise<CallToolResult> {
+    // The active state (FinishedState) will handle this.
+    return this._currentState.tryAgain(this);
   }
 
-  public get currentState(): IBenchmarkState {
+  public get currentState(): AbstractBenchmarkState {
     return this._currentState;
   }
 }

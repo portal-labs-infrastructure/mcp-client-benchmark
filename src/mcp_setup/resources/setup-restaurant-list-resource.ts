@@ -13,6 +13,7 @@ import {
   FoodCategory,
 } from '../../benchmark/core/benchmark-constants';
 import { activeContexts } from '../../controllers/mcp.controller';
+import { getSessionRestaurants } from '../../benchmark/core/benchmark-utils';
 
 export function setupRestaurantListResource(
   server: McpServer,
@@ -40,13 +41,18 @@ export function setupRestaurantListResource(
       | undefined;
 
     if (currentCategory && RESTAURANT_DATA[currentCategory]) {
-      // If a category is selected, show the menus for it
+      // If a category is selected, generate session-specific IDs for the restaurants.
+      const sessionRestaurants = getSessionRestaurants(
+        sessionId,
+        currentCategory,
+      );
+
       data = {
         title: `Menus for ${currentCategory}`,
-        items: RESTAURANT_DATA[currentCategory],
+        items: sessionRestaurants,
       };
     } else {
-      // Otherwise, show the list of categories
+      // Otherwise, show the list of categories. No change needed here.
       data = {
         title: 'Available Food Categories',
         items: Object.keys(RESTAURANT_DATA).map((cat) => ({
@@ -73,6 +79,7 @@ export function setupRestaurantListResource(
     { description: 'Available restaurants and food categories.' },
     handler,
   );
+  resource.disable(); // Start disabled until the category is selected
 
   return resource;
 }

@@ -1,29 +1,40 @@
 import { CallToolResult } from '@modelcontextprotocol/sdk/types';
 import { BenchmarkContext } from '../core/benchmark-context';
-import { IBenchmarkState } from './benchmark-state.interface';
-import { RESTAURANT_DATA, FoodCategory } from '../core/benchmark-constants';
+import { FoodCategory } from '../core/benchmark-constants';
 import { AwaitingElicitationState } from './awaiting-elicitation.state';
 import { AwaitingDetailsToolState } from './awaiting-details-tool.state';
+import { AbstractBenchmarkState } from './abstract-benchmark.state';
+import { getSessionRestaurants } from '../core/benchmark-utils';
 
-export class AwaitingMenuState implements IBenchmarkState {
+export class AwaitingMenuState extends AbstractBenchmarkState {
   async enter(context: BenchmarkContext): Promise<void> {
     console.log(
       `[State] Entering AwaitingMenuState for session ${context.sessionId}`,
     );
-    context.mcpEntities.selectMenuTool?.enable();
-
-    // Dynamically update the resource to show menus for the selected category
-    const category = context.reservationDetails.category as FoodCategory;
-    if (category && RESTAURANT_DATA[category]) {
-      context.mcpEntities.restaurantListResource?.update({
-        // The content of the resource is now the list of menus
-        // contents: RESTAURANT_DATA[category],
-      });
-    }
   }
 
   async exit(context: BenchmarkContext): Promise<void> {
-    context.mcpEntities.selectMenuTool?.disable();
+    console.log(
+      `[State] Exiting AwaitingMenuState for session ${context.sessionId}`,
+    );
+  }
+
+  getEnterConfigActions(context: BenchmarkContext) {
+    console.log(
+      `[State] Entering AwaitingMenuState for session ${context.sessionId}`,
+    );
+
+    return [
+      () => context.mcpEntities.selectMenuTool?.enable(),
+      () => context.mcpEntities.restaurantListResource?.enable(),
+    ];
+  }
+
+  getExitConfigActions(context: BenchmarkContext) {
+    return [
+      () => context.mcpEntities.selectMenuTool?.disable(),
+      () => context.mcpEntities.restaurantListResource?.disable(),
+    ];
   }
 
   async selectMenu(
@@ -31,7 +42,8 @@ export class AwaitingMenuState implements IBenchmarkState {
     menuId: string,
   ): Promise<CallToolResult> {
     const category = context.reservationDetails.category as FoodCategory;
-    const availableMenus = RESTAURANT_DATA[category] || [];
+    const availableMenus =
+      getSessionRestaurants(context.sessionId, category) || [];
     const chosenMenu = availableMenus.find((m) => m.id === menuId);
 
     if (!chosenMenu) {
@@ -48,82 +60,26 @@ export class AwaitingMenuState implements IBenchmarkState {
 
     await context.updateAndPersistSessionData({ menu: chosenMenu.name });
 
-    // *** BENCHMARK VALIDATION ***
+    let message: string;
     if (context.capabilities.elicitation) {
       console.log(
         `[State] Client supports elicitation. Transitioning to AwaitingElicitationState.`,
       );
       await context.transitionTo(new AwaitingElicitationState());
+      message = `Menu '${chosenMenu.name}' selected. The next step is to generate your confirmation email.`;
     } else {
       console.log(
         `[State] Client does not support elicitation. Falling back to tool. Transitioning to AwaitingDetailsToolState.`,
       );
       await context.transitionTo(new AwaitingDetailsToolState());
+      message = `Menu '${chosenMenu.name}' selected. Please provide details for your reservation using the tool.`;
     }
 
     return {
       content: [
         {
           type: 'text',
-          text: `Menu '${chosenMenu.name}' selected. Please provide reservation details.`,
-        },
-      ],
-    };
-  }
-
-  // --- Reject other actions ---
-  async startBenchmark(context: BenchmarkContext): Promise<CallToolResult> {
-    return {
-      content: [
-        { type: 'text', text: 'Error: Benchmark is already in progress.' },
-      ],
-    };
-  }
-  async chooseCategory(
-    context: BenchmarkContext,
-    category: string,
-  ): Promise<CallToolResult> {
-    return {
-      content: [{ type: 'text', text: 'Error: Category already chosen.' }],
-    };
-  }
-  async submitElicitation(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<void> {
-    console.warn(
-      `[State] Elicitation submitted in invalid state: AwaitingMenuState`,
-    );
-  }
-  async submitSampling(
-    context: BenchmarkContext,
-    summary: string,
-  ): Promise<void> {
-    console.warn(
-      `[State] Sampling submitted in invalid state: AwaitingMenuState`,
-    );
-  }
-  async submitDetailsAsTool(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<CallToolResult> {
-    console.warn(
-      `[State] Details submitted in invalid state: AwaitingMenuState`,
-    );
-    return {
-      content: [
-        { type: 'text', text: 'Error: Details submission not allowed here.' },
-      ],
-    };
-  }
-  async getConfirmationEmail(
-    context: BenchmarkContext,
-  ): Promise<CallToolResult> {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: 'Error: You must submit the reservation details before getting a confirmation.',
+          text: message,
         },
       ],
     };

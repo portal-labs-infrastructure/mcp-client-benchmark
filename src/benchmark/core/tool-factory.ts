@@ -1,10 +1,10 @@
 import { z } from 'zod';
-import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol';
+import { RequestHandlerExtra } from '@modelcontextprotocol/sdk/shared/protocol.js';
 import {
   CallToolResult,
   ServerNotification,
   ServerRequest,
-} from '@modelcontextprotocol/sdk/types';
+} from '@modelcontextprotocol/sdk/types.js';
 import { BenchmarkContext } from './benchmark-context';
 
 // We need to import the map from the controller to access it.

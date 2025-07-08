@@ -20,10 +20,10 @@
     "ts-node": "^10.9.2"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.13.1",
+    "@modelcontextprotocol/sdk": "file:../typescript-sdk",
+    "@supabase/supabase-js": "^2.50.0",
     "express": "^5.1.0",
     "morgan": "^1.10.0",
-    "@supabase/supabase-js": "^2.50.0",
     "uuid": "^11.1.0"
   }
 }

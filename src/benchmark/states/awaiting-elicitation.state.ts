@@ -1,8 +1,7 @@
-import { CallToolResult } from '@modelcontextprotocol/sdk/types';
 import { z } from 'zod';
 import { BenchmarkContext } from '../core/benchmark-context';
-import { IBenchmarkState } from './benchmark-state.interface';
 import { AwaitingConfirmationState } from './awaiting-confirmation.state';
+import { AbstractBenchmarkState } from './abstract-benchmark.state';
 
 // Define the schema for the data we expect from the client
 const ElicitationSchema = z.object({
@@ -10,28 +9,15 @@ const ElicitationSchema = z.object({
   time: z.string().regex(/^\d{2}:\d{2}$/, 'Time must be in HH:MM format'),
 });
 
-export class AwaitingElicitationState implements IBenchmarkState {
+export class AwaitingElicitationState extends AbstractBenchmarkState {
   async enter(context: BenchmarkContext): Promise<void> {
     console.log(
       `[State] Entering AwaitingElicitationState for session ${context.sessionId}`,
     );
 
-    // --- PROACTIVE CHECK (Optional but Recommended) ---
-    // This assumes you've stored capabilities in the context
-    if (!context.capabilities.elicitation) {
-      console.error(
-        `[State] Client for session ${context.sessionId} does not support elicitation. Failing run.`,
-      );
-      await context.finalize({
-        success: false,
-        score: 0,
-        details: { reason: 'Client does not support elicitation' },
-      });
-      return;
-    }
-
-    // --- IMMEDIATE FIX: CHECK THE RESPONSE ---
     try {
+      // This single call handles the entire request/response cycle.
+      // The 'await' will not resolve until the client sends back its data.
       const elicitationResult =
         await context.mcpEntities.server.server.elicitInput({
           message: 'Please provide the reservation details.',
@@ -49,138 +35,74 @@ export class AwaitingElicitationState implements IBenchmarkState {
               },
             },
             required: ['guests', 'time'],
-            additionalProperties: false,
           },
         });
 
-      // If the client sent back an error (e.g., feature not supported), the request fails.
-      if (!elicitationResult.success) {
+      // --- All validation and state transition logic now happens here ---
+
+      // Case 1: The user cancelled, or the client returned an error.
+      if (elicitationResult.action !== 'accept') {
         console.error(
-          `[State] Elicitation request failed for session ${context.sessionId}:`,
+          `[State] Elicitation was not accepted by client for session ${context.sessionId}:`,
           elicitationResult.error,
         );
-        await context.finalize({
-          success: false,
-          score: 0,
-          details: {
-            reason: 'Client rejected or failed the elicitation request.',
-            error: elicitationResult.error,
-          },
-        });
-        return;
+        context.awardPoints(
+          'elicitation_support',
+          'FAILED',
+          0,
+          `Client returned action '${elicitationResult.action}'.`,
+        );
+        await context.finalize();
+        return; // End the flow here.
       }
 
-      console.log(
-        `[State] Elicitation request successfully sent to client for session ${context.sessionId}.`,
+      // Case 2: The user submitted data. We must validate it.
+      // The result already contains the user's data in the `content` property.
+      const validationResult = ElicitationSchema.safeParse(
+        elicitationResult.content,
       );
-      // Now we wait for the client to send the 'elicitation/response' which triggers submitElicitation().
+
+      if (!validationResult.success) {
+        context.awardPoints(
+          'elicitation_support',
+          'FAILED',
+          0,
+          'Client submitted data that failed schema validation.',
+        );
+        // The submitted data was invalid. Finalize the run as a failure.
+        await context.finalize();
+        // We could optionally send a message back to the client here if the protocol supported it,
+        // but for the benchmark, finalizing is sufficient.
+        return; // End the flow here.
+      }
+
+      // Case 3: The data is valid. Proceed to the next state.
+      context.awardPoints(
+        'elicitation_support',
+        'PASSED',
+        25,
+        'Client successfully submitted valid data via elicitation.',
+      );
+
+      const { guests, time } = validationResult.data;
+      await context.updateAndPersistSessionData({ guests, time });
+      await context.transitionTo(new AwaitingConfirmationState());
+      console.log(
+        `[State] Elicitation successful for session ${context.sessionId}. Transitioning...`,
+      );
     } catch (error) {
       console.error(
         `[State] Critical error during elicitation for session ${context.sessionId}:`,
         error,
       );
-      await context.finalize({
-        success: false,
-        score: 0,
-        details: { reason: 'Server error during elicitation.' },
-      });
+      await context.finalize();
     }
   }
 
-  async exit(context: BenchmarkContext): Promise<void> {
-    /* No action needed */
-  }
-
-  async submitElicitation(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<CallToolResult | void> {
-    const validationResult = ElicitationSchema.safeParse(data);
-
-    if (!validationResult.success) {
-      // Finalize the run in the DB first.
-      await context.finalize({
-        success: false,
-        score: 0,
-        details: {
-          reason: 'Invalid elicitation data submitted',
-          errors: validationResult.error.issues,
-        },
-      });
-
-      // --- NEW: Return a user-facing error message ---
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Submission failed. Please check your input and try again. Errors: ${validationResult.error.flatten().fieldErrors}`,
-          },
-        ],
-      };
-    }
-
-    // On success, we proceed as normal and don't return anything.
-    // The next state transition will handle the UI update.
-    const { guests, time } = validationResult.data;
-    await context.updateAndPersistSessionData({ guests, time });
-    await context.transitionTo(new AwaitingConfirmationState());
-  }
-
-  // --- Reject other actions ---
-  async startBenchmark(context: BenchmarkContext): Promise<CallToolResult> {
-    /* ... */ return {
-      content: [
-        { type: 'text', text: 'Error: Benchmark is already in progress.' },
-      ],
-    };
-  }
-  async chooseCategory(
-    context: BenchmarkContext,
-    category: string,
-  ): Promise<CallToolResult> {
-    /* ... */ return {
-      content: [{ type: 'text', text: 'Error: Category already chosen.' }],
-    };
-  }
-  async selectMenu(
-    context: BenchmarkContext,
-    menu: string,
-  ): Promise<CallToolResult> {
-    /* ... */ return {
-      content: [{ type: 'text', text: 'Error: Menu already chosen.' }],
-    };
-  }
-  async submitSampling(
-    context: BenchmarkContext,
-    summary: string,
-  ): Promise<void> {
-    /* ... */ console.warn(
-      `[State] Sampling submitted in invalid state: AwaitingElicitationState`,
+  async exit(context: BenchmarkContext) {
+    console.log(
+      `[State] Exiting AwaitingElicitationState for session ${context.sessionId}`,
     );
-  }
-  async submitDetailsAsTool(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<CallToolResult> {
-    console.warn(
-      `[State] Details submitted in invalid state: AwaitingElicitationState`,
-    );
-    return {
-      content: [
-        { type: 'text', text: 'Error: Details submission not allowed here.' },
-      ],
-    };
-  }
-  async getConfirmationEmail(
-    context: BenchmarkContext,
-  ): Promise<CallToolResult> {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: 'Error: You must submit the reservation details before getting a confirmation.',
-        },
-      ],
-    };
+    // No specific actions needed on exit, but we could disable tools if any were enabled.
   }
 }

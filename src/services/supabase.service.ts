@@ -166,7 +166,7 @@ export class BenchmarkDbService {
   }
 
   /**
-   * Finalizes a benchmark run, calculating results and cleaning up the session.
+   * Finalizes a benchmark run, calculating results and updating the session state.
    * @param sessionId The UUID of the session that has finished.
    * @param result The final result object.
    */
@@ -203,6 +203,7 @@ export class BenchmarkDbService {
       .update({
         status: 'completed',
         success: result.success,
+        score: result.score,
         results: { score: result.score, details: result.details },
         time_to_completion_ms: timeToCompletion,
         completed_at: endTime.toISOString(),
@@ -210,11 +211,101 @@ export class BenchmarkDbService {
       .eq('id', runId);
     if (updateError) throw updateError;
 
-    // 4. Clean up the live session
-    const { error: deleteError } = await this.db
+    // 4. *** THE FIX ***: Update the session to 'FinishedState' instead of deleting it.
+    // This keeps the session alive so the user can see results and try again.
+    const { error: updateSessionError } = await this.db
       .from('benchmark_sessions')
-      .delete()
+      .update({
+        current_step: 'FinishedState',
+        session_data: {}, // Clear session data as it's now stored in the run
+      })
       .eq('id', sessionId);
-    if (deleteError) throw deleteError;
+    if (updateSessionError) throw updateSessionError;
+  }
+
+  /**
+   * Resets a session for a new run. It creates a new `benchmark_runs` record
+   * and points the existing `benchmark_sessions` record to it.
+   * @param sessionId The UUID of the session to reset.
+   */
+  public async resetSessionData(sessionId: string): Promise<void> {
+    // 1. Get the current run to find the client_id and capabilities.
+    const { data: currentSession, error: sessionError } = await this.db
+      .from('benchmark_sessions')
+      .select('run_id')
+      .eq('id', sessionId)
+      .single();
+    if (sessionError || !currentSession)
+      throw sessionError || new Error('Session not found for reset.');
+
+    const { data: currentRun, error: runError } = await this.db
+      .from('benchmark_runs')
+      .select('client_id, declared_capabilities')
+      .eq('id', currentSession.run_id)
+      .single();
+    if (runError || !currentRun)
+      throw runError || new Error('Original run not found for reset.');
+
+    // 2. Create a new `benchmark_runs` record for the same client.
+    const { data: newRun, error: newRunError } = await this.db
+      .from('benchmark_runs')
+      .insert({
+        client_id: currentRun.client_id,
+        status: 'in_progress',
+        declared_capabilities: currentRun.declared_capabilities,
+      })
+      .select('id')
+      .single();
+    if (newRunError || !newRun)
+      throw newRunError || new Error('Failed to create new run for reset.');
+
+    // 3. Update the existing session to point to the new run and reset its state.
+    const { error: updateError } = await this.db
+      .from('benchmark_sessions')
+      .update({
+        run_id: newRun.id,
+        current_step: 'IdleState',
+        session_data: {},
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', sessionId);
+    if (updateError) throw updateError;
+
+    console.log(
+      `[DB] Session ${sessionId} has been reset with new run ID ${newRun.id}.`,
+    );
+  }
+
+  /**
+   * Retrieves the most recently completed run for a given session.
+   * @param sessionId The session to find the latest run for.
+   */
+  public async getLatestRunForSession(
+    sessionId: string,
+  ): Promise<BenchmarkRun | null> {
+    const { data: session, error: sessionError } = await this.db
+      .from('benchmark_sessions')
+      .select('run_id')
+      .eq('id', sessionId)
+      .single();
+    if (sessionError || !session) return null;
+
+    return this.getRun(session.run_id);
+  }
+
+  /**
+   * Retrieves all successful runs, ordered by score and then time, for ranking.
+   */
+  public async getAllSuccessfulRunsRanked(): Promise<BenchmarkRun[]> {
+    const { data, error } = await this.db
+      .from('benchmark_runs')
+      .select('*')
+      .eq('status', 'completed')
+      .eq('success', true)
+      .order('score', { ascending: false })
+      .order('time_to_completion_ms', { ascending: true });
+
+    if (error) throw error;
+    return data as BenchmarkRun[];
   }
 }

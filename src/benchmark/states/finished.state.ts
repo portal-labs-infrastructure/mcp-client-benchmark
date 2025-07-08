@@ -1,80 +1,36 @@
 import { CallToolResult } from '@modelcontextprotocol/sdk/types';
 import { BenchmarkContext } from '../core/benchmark-context';
-import { IBenchmarkState } from './benchmark-state.interface';
+import { AbstractBenchmarkState } from './abstract-benchmark.state';
+import { IdleState } from './idle.state';
 
-export class FinishedState implements IBenchmarkState {
+export class FinishedState extends AbstractBenchmarkState {
   async enter(context: BenchmarkContext): Promise<void> {
     console.log(
       `[State] Entering FinishedState for session ${context.sessionId}`,
     );
-    // This is the successful completion of the benchmark.
-    await context.finalize({
-      success: true,
-      score: 100, // For v0, score is binary. Can be more nuanced later.
-      details: { ...context.reservationDetails },
-    });
-    // TODO: Enable a 'view_results' or 'restart' tool.
+    // Enable the tools and resources for the end screen.
+    context.mcpEntities.tryAgainTool?.enable();
+    context.mcpEntities.benchmarkResultsResource?.enable();
   }
 
   async exit(context: BenchmarkContext): Promise<void> {
-    /* Terminal state, no exit */
+    // Disable everything when we leave this state.
+    context.mcpEntities.tryAgainTool?.disable();
+    context.mcpEntities.benchmarkResultsResource?.disable();
   }
 
-  // --- Reject all actions, the benchmark is over ---
-  async startBenchmark(context: BenchmarkContext): Promise<CallToolResult> {
-    return {
-      content: [{ type: 'text', text: 'Benchmark finished. Please restart.' }],
-    };
-  }
-  async chooseCategory(
-    context: BenchmarkContext,
-    category: string,
-  ): Promise<CallToolResult> {
-    return {
-      content: [{ type: 'text', text: 'Benchmark finished. Please restart.' }],
-    };
-  }
-  async selectMenu(
-    context: BenchmarkContext,
-    menu: string,
-  ): Promise<CallToolResult> {
-    return {
-      content: [{ type: 'text', text: 'Benchmark finished. Please restart.' }],
-    };
-  }
-  async submitElicitation(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<void> {
-    console.warn(
-      `[State] Elicitation submitted in invalid state: FinishedState`,
+  // This method will be called by the 'try_again' tool's handler.
+  async tryAgain(context: BenchmarkContext): Promise<CallToolResult> {
+    console.log(
+      `[State] Resetting session ${context.sessionId} for a new run.`,
     );
-  }
-  async submitSampling(
-    context: BenchmarkContext,
-    summary: string,
-  ): Promise<void> {
-    console.warn(`[State] Sampling submitted in invalid state: FinishedState`);
-  }
-  async submitDetailsAsTool(
-    context: BenchmarkContext,
-    data: object,
-  ): Promise<CallToolResult> {
-    console.warn(`[State] Details submitted in invalid state: FinishedState`);
-    return {
-      content: [
-        { type: 'text', text: 'Error: Details submission not allowed here.' },
-      ],
-    };
-  }
-  async getConfirmationEmail(
-    context: BenchmarkContext,
-  ): Promise<CallToolResult> {
+    await context.resetForNewRun();
+    await context.transitionTo(new IdleState());
     return {
       content: [
         {
           type: 'text',
-          text: 'Error: You must submit the reservation details before getting a confirmation.',
+          text: 'Session reset. Ready to start a new benchmark.',
         },
       ],
     };
