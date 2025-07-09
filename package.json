@@ -1,7 +1,7 @@
 {
-  "name": "mcp-client-evals",
+  "name": "mcp-client-benchmark",
   "version": "0.1.0",
-  "description": "An MCP server for MCP client evaluations",
+  "description": "An MCP server for MCP client benchmarking",
   "scripts": {
     "start": "node build/src/index.js",
     "build": "rimraf build && tsc",
@@ -20,10 +20,12 @@
     "ts-node": "^10.9.2"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "file:../typescript-sdk",
-    "@supabase/supabase-js": "^2.50.0",
+    "@modelcontextprotocol/sdk": "^1.13.1",
+    "@solana/wallet-standard-features": "^1.3.0",
+    "@supabase/supabase-js": "^2.50.3",
     "express": "^5.1.0",
     "morgan": "^1.10.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "zod": "^3.23.8"
   }
 }

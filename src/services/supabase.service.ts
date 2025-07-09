@@ -7,9 +7,10 @@ import {
 } from '../benchmark/core/benchmark-types';
 import { createClient } from '../db/supabase';
 import { InitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import { Database } from '../../types/supabase';
 
 // Export the client for direct use if needed, and the service for structured access
-export const supabase: SupabaseClient = createClient();
+export const supabase: SupabaseClient<Database> = createClient();
 
 /**
  * Manages all database operations for the benchmark service.
@@ -17,7 +18,7 @@ export const supabase: SupabaseClient = createClient();
 export class BenchmarkDbService {
   private db: SupabaseClient;
 
-  constructor(supabaseInstance: SupabaseClient) {
+  constructor(supabaseInstance: SupabaseClient<Database>) {
     this.db = supabaseInstance;
   }
 

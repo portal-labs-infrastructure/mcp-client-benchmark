@@ -25,10 +25,10 @@ export function createMcpServerOptions() {
     // Add any specific options you want to configure for the MCP server
     // For example, you might want to set a custom transport or other settings
     // transport: new SomeCustomTransport(),
-    debouncedNotificationMethods: [
-      'notifications/tools/list_changed',
-      'notifications/resources/list_changed',
-      // Add any other notification methods you want to debounce
-    ],
+    // debouncedNotificationMethods: [
+    //   'notifications/tools/list_changed',
+    //   'notifications/resources/list_changed',
+    //   // Add any other notification methods you want to debounce
+    // ],
   };
 }

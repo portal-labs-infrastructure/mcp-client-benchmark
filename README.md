@@ -1,1 +1,1 @@
-# mcp-client-evals
+# mcp-client-benchmark
