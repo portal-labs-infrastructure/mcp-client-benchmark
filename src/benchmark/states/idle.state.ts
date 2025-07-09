@@ -28,6 +28,7 @@ export class IdleState extends AbstractBenchmarkState {
 
   async startBenchmark(context: BenchmarkContext): Promise<CallToolResult> {
     // Transition to the next state
+    await context.ensureRunIsCreated();
     await context.transitionTo(new AwaitingCategoryState());
     return {
       content: [

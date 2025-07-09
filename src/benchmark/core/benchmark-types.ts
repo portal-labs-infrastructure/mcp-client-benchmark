@@ -3,7 +3,10 @@ import {
   RegisteredResource,
   RegisteredTool,
 } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { ClientCapabilities } from '@modelcontextprotocol/sdk/types.js';
+import {
+  ClientCapabilities,
+  InitializeRequest,
+} from '@modelcontextprotocol/sdk/types.js';
 
 // From the MCP initialize request
 export interface ClientInfo {
@@ -20,6 +23,7 @@ export interface RestaurantDetails {
 
 // Data collected during the benchmark run
 export interface ReservationDetails {
+  initParams?: InitializeRequest['params'];
   category?: string;
   menu?: string;
   guests?: number;
@@ -32,7 +36,7 @@ export interface ReservationDetails {
 // Maps to the 'benchmark_sessions' table
 export interface BenchmarkSession {
   id: string; // session_id
-  run_id: string;
+  run_id: string | null; // The ID of the run this session is associated with, if any
   current_step: string;
   session_data: ReservationDetails;
 }

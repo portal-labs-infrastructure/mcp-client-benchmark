@@ -9,6 +9,7 @@ import {
 import {
   CallToolResult,
   ClientCapabilities,
+  InitializeRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { AwaitingMenuState } from '../states/awaiting-menu.state';
 import { IdleState } from '../states/idle.state';
@@ -71,14 +72,14 @@ export class BenchmarkContext {
 
   // Public properties accessible by states and commands
   public readonly sessionId: string;
-  public readonly runId: string;
+  public runId: string | null; // Run ID can be null if not yet created
   public readonly mcpEntities: McpEntities;
   public reservationDetails: ReservationDetails;
   public readonly capabilities: ClientCapabilities;
 
   private constructor(
     sessionId: string,
-    runId: string,
+    runId: string | null,
     capabilities: ClientCapabilities,
     mcpEntities: McpEntities,
     initialDetails: ReservationDetails,
@@ -102,12 +103,27 @@ export class BenchmarkContext {
   ): Promise<BenchmarkContext> {
     // Use the service to get the run details, including capabilities
     const dbService = new BenchmarkDbService(supabase);
-    const runRecord = await dbService.getRun(session.run_id);
+    let runCapabilities: InitializeRequest['params']['capabilities'] = {};
+
+    if (session.run_id) {
+      // SCENARIO 1: Resuming an existing run.
+      // The run_id exists, so we can fetch the run record to get capabilities.
+      const runRecord = await dbService.getRun(session.run_id);
+      runCapabilities = runRecord.declared_capabilities || {};
+    } else {
+      // SCENARIO 2: A new session that has not yet started a run.
+      // The run_id is null. We must get capabilities from the session_data.
+      const initParams = (session.session_data as any)
+        ?.init_params as InitializeRequest['params'];
+      if (initParams && initParams.capabilities) {
+        runCapabilities = initParams.capabilities;
+      }
+    }
 
     const context = new BenchmarkContext(
       session.id,
-      session.run_id,
-      runRecord.declared_capabilities || {}, // Pass capabilities from the run record
+      session.run_id, // This is correctly null or a string
+      runCapabilities, // This is now correctly populated in both scenarios
       mcpEntities,
       session.session_data as ReservationDetails,
     );
@@ -202,6 +218,19 @@ export class BenchmarkContext {
     };
 
     await this.dbService.finalizeRun(this.sessionId, result);
+  }
+
+  public async ensureRunIsCreated(): Promise<void> {
+    if (this.runId) {
+      // Run already exists, do nothing.
+      return;
+    }
+
+    console.log(
+      `[Context] No run found for session ${this.sessionId}. Creating one now.`,
+    );
+    const newRunId = await this.dbService.createRunForSession(this.sessionId);
+    this.runId = newRunId; // Update the context with the new ID.
   }
 
   /**

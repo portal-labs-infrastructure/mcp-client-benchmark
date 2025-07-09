@@ -21,6 +21,7 @@ import {
 import { setupVerifyCodeTool } from '../mcp_setup/tools/setup-verify-code-tool';
 import { setupBenchmarkResultsResource } from '../mcp_setup/resources/setup-benchmark-results-resource';
 import { setupTryAgainTool } from '../mcp_setup/tools/setup-try-again-tool';
+import crypto from 'crypto';
 
 // --- Global State ---
 // Each map holds the live objects for all active sessions, keyed by session ID.

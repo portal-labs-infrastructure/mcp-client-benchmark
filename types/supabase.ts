@@ -66,7 +66,7 @@ export type Database = {
           created_at: string;
           current_step: string | null;
           id: string;
-          run_id: string;
+          run_id: string | null;
           session_data: Json | null;
           updated_at: string;
         };
@@ -74,7 +74,7 @@ export type Database = {
           created_at?: string;
           current_step?: string | null;
           id: string;
-          run_id: string;
+          run_id?: string | null;
           session_data?: Json | null;
           updated_at?: string;
         };
@@ -82,7 +82,7 @@ export type Database = {
           created_at?: string;
           current_step?: string | null;
           id?: string;
-          run_id?: string;
+          run_id?: string | null;
           session_data?: Json | null;
           updated_at?: string;
         };

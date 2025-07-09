@@ -58,20 +58,13 @@ export class BenchmarkDbService {
 
     return newClient.id;
   }
-
   /**
-   * Retrieves a benchmark session by its ID. If it doesn't exist, it creates
-   * all necessary records (client, run, session) and returns the new session.
-   * This is the primary method for starting or resuming a session.
-   * @param sessionId The transport-generated session identifier.
-   * @param clientInfo The client info, required only if creating a new session.
-   * @returns A promise that resolves to the full BenchmarkSession object.
+   * MODIFIED: Creates a session without a run. The run is created later.
    */
   public async getOrCreateSession(
     sessionId: string,
     initParams: InitializeRequest['params'],
   ): Promise<BenchmarkSession> {
-    // 1. Try to get the existing session first.
     const { data: existingSession } = await this.db
       .from('benchmark_sessions')
       .select('*')
@@ -82,34 +75,18 @@ export class BenchmarkDbService {
       return existingSession as BenchmarkSession;
     }
 
-    // 2. If it doesn't exist, create the full stack.
-    const clientInfo = initParams.clientInfo;
-    const capabilities = initParams.capabilities; // <-- Get capabilities here
-
-    const clientId = await this.findOrCreateClient(clientInfo);
-
-    // Create the parent benchmark_runs record
-    const { data: runData, error: runError } = await this.db
-      .from('benchmark_runs')
-      .insert({
-        client_id: clientId,
-        status: 'in_progress',
-        declared_capabilities: capabilities, // <-- SAVE THE CAPABILITIES
-      })
-      .select('id')
-      .single();
-
-    if (runError || !runData)
-      throw runError || new Error('Failed to create benchmark run.');
-    const runId = runData.id;
-
-    // Create the live benchmark_sessions record
+    // --- THE CHANGE ---
+    // We no longer create a benchmark_runs record here.
+    // Instead, we store the init_params in the session_data to use later.
     const newSessionData: Omit<BenchmarkSession, 'created_at' | 'updated_at'> =
       {
         id: sessionId,
-        run_id: runId,
-        current_step: 'IdleState', // The name of the initial state class
-        session_data: {},
+        run_id: null, // The run has not started yet.
+        current_step: 'IdleState',
+        session_data: {
+          // Store init params so we can create the run correctly when the user clicks "start".
+          initParams,
+        },
       };
 
     const { data: newSession, error: sessionError } = await this.db
@@ -118,10 +95,65 @@ export class BenchmarkDbService {
       .select()
       .single();
 
-    if (sessionError || !newSession)
+    if (sessionError || !newSession) {
       throw sessionError || new Error('Failed to create benchmark session.');
+    }
 
     return newSession as BenchmarkSession;
+  }
+
+  /**
+   * NEW METHOD: Creates a run record and links it to an existing session.
+   * This is called when the user actually starts the benchmark.
+   * @returns The ID of the newly created run.
+   */
+  public async createRunForSession(sessionId: string): Promise<string> {
+    // 1. Get the session and its stored init_params
+    const { data: session, error: sessionError } = await this.db
+      .from('benchmark_sessions')
+      .select('session_data')
+      .eq('id', sessionId)
+      .single();
+
+    if (sessionError || !session) {
+      throw sessionError || new Error('Session not found to create run for.');
+    }
+
+    const initParams = (session.session_data as any)
+      ?.init_params as InitializeRequest['params'];
+    if (!initParams) {
+      throw new Error('init_params not found in session data.');
+    }
+
+    // 2. Create the client record
+    const clientId = await this.findOrCreateClient(initParams.clientInfo);
+
+    // 3. Create the benchmark_runs record
+    const { data: runData, error: runError } = await this.db
+      .from('benchmark_runs')
+      .insert({
+        client_id: clientId,
+        status: 'in_progress',
+        declared_capabilities: initParams.capabilities,
+      })
+      .select('id')
+      .single();
+
+    if (runError || !runData) {
+      throw runError || new Error('Failed to create benchmark run.');
+    }
+    const newRunId = runData.id;
+
+    // 4. Update the session to link to the new run
+    const { error: updateError } = await this.db
+      .from('benchmark_sessions')
+      .update({ run_id: newRunId })
+      .eq('id', sessionId);
+
+    if (updateError) throw updateError;
+
+    console.log(`[DB] Created run ${newRunId} for session ${sessionId}.`);
+    return newRunId;
   }
 
   /**
