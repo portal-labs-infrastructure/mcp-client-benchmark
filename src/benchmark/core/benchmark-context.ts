@@ -101,20 +101,23 @@ export class BenchmarkContext {
     session: BenchmarkSession,
     mcpEntities: McpEntities,
   ): Promise<BenchmarkContext> {
-    // Use the service to get the run details, including capabilities
     const dbService = new BenchmarkDbService(supabase);
     let runCapabilities: InitializeRequest['params']['capabilities'] = {};
+    let loadedScorecard: Scorecard | null = null; // <-- MODIFICATION: Prepare to load scorecard
 
     if (session.run_id) {
       // SCENARIO 1: Resuming an existing run.
-      // The run_id exists, so we can fetch the run record to get capabilities.
       const runRecord = await dbService.getRun(session.run_id);
       runCapabilities = runRecord.declared_capabilities || {};
+      // --- MODIFICATION: Load scorecard from the run record ---
+      if (runRecord.results && (runRecord.results as any).details) {
+        loadedScorecard = (runRecord.results as any).details as Scorecard;
+      }
+      // --- END MODIFICATION ---
     } else {
       // SCENARIO 2: A new session that has not yet started a run.
-      // The run_id is null. We must get capabilities from the session_data.
       const initParams = (session.session_data as any)
-        ?.init_params as InitializeRequest['params'];
+        ?.initParams as InitializeRequest['params'];
       if (initParams && initParams.capabilities) {
         runCapabilities = initParams.capabilities;
       }
@@ -122,13 +125,22 @@ export class BenchmarkContext {
 
     const context = new BenchmarkContext(
       session.id,
-      session.run_id, // This is correctly null or a string
-      runCapabilities, // This is now correctly populated in both scenarios
+      session.run_id,
+      runCapabilities,
       mcpEntities,
-      session.session_data as ReservationDetails,
+      // session_data is now correctly just for reservation details
+      (session.session_data as ReservationDetails) || {},
     );
 
-    context.scorecard = JSON.parse(JSON.stringify(RUBRIC_TEMPLATE));
+    // --- MODIFICATION: Initialize scorecard based on what was loaded ---
+    if (loadedScorecard) {
+      context.scorecard = loadedScorecard;
+      console.log('[Context] Resumed run with existing scorecard.');
+    } else {
+      context.scorecard = JSON.parse(JSON.stringify(RUBRIC_TEMPLATE));
+      console.log('[Context] Started with a fresh scorecard.');
+    }
+    // --- END MODIFICATION ---
 
     await context.loadState(session.current_step);
     return context;
@@ -144,8 +156,6 @@ export class BenchmarkContext {
       throw new Error(`Unknown state name loaded from DB: ${stateName}`);
     }
     this._currentState = new StateClass();
-    // Note: We don't call enter() here. The initial UI setup is handled
-    // by the controller after the context is fully created.
   }
 
   /**
@@ -156,35 +166,29 @@ export class BenchmarkContext {
     const newStateName = state.constructor.name;
     const oldState = this._currentState;
 
-    // --- BATCHED CONFIGURATION PHASE ---
-    // 1. Gather all synchronous configuration actions from both states.
     const exitConfigActions = oldState.getExitConfigActions(this);
     const enterConfigActions = state.getEnterConfigActions(this);
 
-    // 2. Execute all configuration actions in a single, synchronous block.
-    // This is where the notification debouncing magic happens.
     for (const action of [...exitConfigActions, ...enterConfigActions]) {
       action();
     }
 
-    // --- ASYNCHRONOUS EXECUTION PHASE ---
-    // 3. Run the async exit logic of the old state.
     await oldState.exit(this);
 
-    // 4. Officially change the state and persist it.
     this._currentState = state;
+    // Persist session data (which no longer includes the scorecard)
     await this.dbService.updateSession(
       this.sessionId,
       newStateName,
       this.reservationDetails,
     );
 
-    // 5. Run the main async entry logic of the new state.
     await this._currentState.enter(this);
   }
 
   /**
-   * Updates the reservation details and persists the entire session_data to the DB.
+   * Updates the reservation details and persists the session_data to the DB.
+   * Note: This no longer persists the scorecard.
    * @param newData A partial object of the reservation details to update.
    */
   public async updateAndPersistSessionData(
@@ -192,7 +196,7 @@ export class BenchmarkContext {
   ): Promise<void> {
     // Update local state
     this.reservationDetails = { ...this.reservationDetails, ...newData };
-    // Persist to DB
+    // Persist to DB - only reservationDetails are saved to the session.
     await this.dbService.updateSession(
       this.sessionId,
       this._currentState.constructor.name,
@@ -205,16 +209,15 @@ export class BenchmarkContext {
    * @param result The final result of the benchmark.
    */
   async finalize() {
-    // No longer needs arguments
     const totalScore = Object.values(this.scorecard).reduce(
       (sum, item) => sum + item.pointsEarned,
       0,
     );
 
     const result = {
-      success: totalScore > 50, // Example success threshold
+      success: totalScore > 50,
       score: totalScore,
-      details: this.scorecard, // The entire rubric is the details!
+      details: this.scorecard,
     };
 
     await this.dbService.finalizeRun(this.sessionId, result);
@@ -222,7 +225,6 @@ export class BenchmarkContext {
 
   public async ensureRunIsCreated(): Promise<void> {
     if (this.runId) {
-      // Run already exists, do nothing.
       return;
     }
 
@@ -230,7 +232,7 @@ export class BenchmarkContext {
       `[Context] No run found for session ${this.sessionId}. Creating one now.`,
     );
     const newRunId = await this.dbService.createRunForSession(this.sessionId);
-    this.runId = newRunId; // Update the context with the new ID.
+    this.runId = newRunId;
   }
 
   /**
@@ -238,33 +240,37 @@ export class BenchmarkContext {
    * This clears in-memory details and persists the reset to the database.
    */
   public async resetForNewRun(): Promise<void> {
-    // Clear in-memory details
     this.reservationDetails = {};
-    // Persist the reset to the database
+    this.scorecard = JSON.parse(JSON.stringify(RUBRIC_TEMPLATE));
     await this.dbService.resetSessionData(this.sessionId);
   }
 
   /**
-   * Awards points for a specific check in the scorecard.
+   * Awards points and persists the updated scorecard to the run record.
    * @param checkId The ID of the check to award points for.
    * @param status The status to set for this check.
    * @param points The number of points awarded (capped at max).
    * @param notes Optional notes about the award.
    */
-  public awardPoints(
+  public async awardPoints(
     checkId: keyof typeof RUBRIC_TEMPLATE,
     status: ScorecardLineItem['status'],
     points: number,
     notes?: string,
-  ) {
+  ): Promise<void> {
     if (this.scorecard[checkId]) {
       const item = this.scorecard[checkId];
       item.status = status;
-      item.pointsEarned = Math.min(points, item.maxPoints); // Cap points at max
+      item.pointsEarned = Math.min(points, item.maxPoints);
       item.notes = notes;
       console.log(
         `[Score] Awarded ${item.pointsEarned}/${item.maxPoints} for '${checkId}'. Notes: ${notes || 'N/A'}`,
       );
+
+      await this.ensureRunIsCreated(); // Make sure we have a run to save to.
+      await this.dbService.updateRunResult(this.runId!, {
+        details: this.scorecard,
+      });
     }
   }
 
@@ -295,7 +301,6 @@ export class BenchmarkContext {
   }
 
   public async tryAgain(): Promise<CallToolResult> {
-    // The active state (FinishedState) will handle this.
     return this._currentState.tryAgain(this);
   }
 

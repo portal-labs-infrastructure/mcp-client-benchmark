@@ -19,24 +19,29 @@ export class AwaitingElicitationState extends AbstractBenchmarkState {
       // This single call handles the entire request/response cycle.
       // The 'await' will not resolve until the client sends back its data.
       const elicitationResult =
-        await context.mcpEntities.server.server.elicitInput({
-          message: 'Please provide the reservation details.',
-          requestedSchema: {
-            type: 'object',
-            properties: {
-              guests: {
-                type: 'integer',
-                description: 'Number of guests (1-20)',
+        await context.mcpEntities.server.server.elicitInput(
+          {
+            message: 'Please provide the reservation details.',
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                guests: {
+                  type: 'integer',
+                  description: 'Number of guests (1-20)',
+                },
+                time: {
+                  type: 'string',
+                  description: 'Reservation time (HH:MM)',
+                  pattern: '^\\d{2}:\\d{2}$',
+                },
               },
-              time: {
-                type: 'string',
-                description: 'Reservation time (HH:MM)',
-                pattern: '^\\d{2}:\\d{2}$',
-              },
+              required: ['guests', 'time'],
             },
-            required: ['guests', 'time'],
           },
-        });
+          {
+            timeout: 2 * 60 * 1000, // 2 minute timeout
+          },
+        );
 
       // --- All validation and state transition logic now happens here ---
 

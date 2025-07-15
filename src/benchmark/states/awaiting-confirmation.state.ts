@@ -55,15 +55,20 @@ export class AwaitingConfirmationState extends AbstractBenchmarkState {
         const prompt = `Generate a friendly, one-paragraph confirmation email body for a reservation at "${menu}" for ${guests} people at ${time}. It is very important that you include the following confirmation code exactly as written: ${confirmationCode}`;
 
         const response: CreateMessageResult =
-          await context.mcpEntities.server.server.createMessage({
-            messages: [
-              {
-                role: 'user',
-                content: { type: 'text', text: prompt },
-              },
-            ],
-            maxTokens: 500,
-          });
+          await context.mcpEntities.server.server.createMessage(
+            {
+              messages: [
+                {
+                  role: 'user',
+                  content: { type: 'text', text: prompt },
+                },
+              ],
+              maxTokens: 500,
+            },
+            {
+              timeout: 2 * 60 * 1000, // 2 minute timeout
+            },
+          );
 
         // Extract the text from the response
         const textPart = response.content.text as string | undefined;

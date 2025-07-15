@@ -4,6 +4,7 @@ import {
   BenchmarkSession,
   ClientInfo,
   ReservationDetails,
+  Scorecard, // <-- Import Scorecard type
 } from '../benchmark/core/benchmark-types';
 import { createClient } from '../db/supabase';
 import { InitializeRequest } from '@modelcontextprotocol/sdk/types.js';
@@ -77,7 +78,7 @@ export class BenchmarkDbService {
 
     // --- THE CHANGE ---
     // We no longer create a benchmark_runs record here.
-    // Instead, we store the init_params in the session_data to use later.
+    // Instead, we store the initParams in the session_data to use later.
     const newSessionData: Omit<BenchmarkSession, 'created_at' | 'updated_at'> =
       {
         id: sessionId,
@@ -108,7 +109,7 @@ export class BenchmarkDbService {
    * @returns The ID of the newly created run.
    */
   public async createRunForSession(sessionId: string): Promise<string> {
-    // 1. Get the session and its stored init_params
+    // 1. Get the session and its stored initParams
     const { data: session, error: sessionError } = await this.db
       .from('benchmark_sessions')
       .select('session_data')
@@ -120,9 +121,9 @@ export class BenchmarkDbService {
     }
 
     const initParams = (session.session_data as any)
-      ?.init_params as InitializeRequest['params'];
+      ?.initParams as InitializeRequest['params'];
     if (!initParams) {
-      throw new Error('init_params not found in session data.');
+      throw new Error('initParams not found in session data.');
     }
 
     // 2. Create the client record
@@ -173,6 +174,43 @@ export class BenchmarkDbService {
       );
     }
     return data as BenchmarkRun;
+  }
+
+  /**
+   * Updates the `results` column of a run record with the latest scorecard.
+   * This is used for persisting progress during an incomplete run.
+   * @param runId The UUID of the run to update.
+   * @param result The partial result object containing the scorecard details.
+   */
+  async updateRunResult(
+    runId: string,
+    result: { details: Scorecard },
+  ): Promise<void> {
+    // Calculate the current score from the provided details.
+    const score = Object.values(result.details).reduce(
+      (sum, item) => sum + item.pointsEarned,
+      0,
+    );
+
+    // Structure the payload to match the `results` column format.
+    const resultsPayload = {
+      score,
+      details: result.details,
+    };
+
+    const { error } = await this.db
+      .from('benchmark_runs')
+      .update({
+        results: resultsPayload,
+        // Also update the score at the top level for easy querying
+        score: score,
+      })
+      .eq('id', runId);
+
+    if (error) {
+      console.error(`[DB] Error updating run result for ${runId}:`, error);
+      throw error;
+    }
   }
 
   /**
