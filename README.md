@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/portal-labs-infrastructure-mcp-client-benchmark-badge.png)](https://mseep.ai/app/portal-labs-infrastructure-mcp-client-benchmark)
+
 # MCP Client Benchmark
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
